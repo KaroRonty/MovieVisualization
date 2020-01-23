@@ -17,7 +17,8 @@ xgb_explain <- xgboost(data = xgb.DMatrix(x, label = y),
                        gamma = xgb$bestTune$gamma,
                        colsample_bytree = xgb$bestTune$colsample_bytree,
                        min_child_weight = xgb$bestTune$min_child_weight,
-                       subsample = xgb$bestTune$subsample)
+                       subsample = xgb$bestTune$subsample,
+                       verbose = FALSE)
 
 # Obtain impacts of predictors
 impacts <- predict(xgb_explain, test_xgb, predcontrib = TRUE)
