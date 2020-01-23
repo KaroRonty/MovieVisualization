@@ -1,22 +1,16 @@
 detach("package:skimr", unload = TRUE)
-# Explaining XGBoost results ----
 library(xgboost)
 library(tibble)
 library(stringr)
 library(ggplot2)
 
-x <- movie_clean %>% model.matrix(avg_rating ~ ., data = .)
-y <- movie_clean %>% pull(avg_rating)
-
-# Make matrices for training and test data
+# Make matrices for training and data to be plotted using a single observation
 training_xgb <- xgb.DMatrix(x, label = y)
-
 test_xgb <- xgb.DMatrix(x[which.min(y), , drop = FALSE])
 
 # Train XGBoost model using the same hyperparameters as caret
 set.seed(123)
-xgb_explain <- xgboost(data = xgb.DMatrix(x,
-                                          label = y), 
+xgb_explain <- xgboost(data = xgb.DMatrix(x, label = y), 
                        nround = xgb$bestTune$nrounds,
                        max_depth = xgb$bestTune$max_depth, 
                        eta = xgb$bestTune$eta,
@@ -25,10 +19,11 @@ xgb_explain <- xgboost(data = xgb.DMatrix(x,
                        min_child_weight = xgb$bestTune$min_child_weight,
                        subsample = xgb$bestTune$subsample)
 
-t1 <- predict(xgb_explain, test_xgb, predcontrib = TRUE)
+# Obtain impacts of predictors
+impacts <- predict(xgb_explain, test_xgb, predcontrib = TRUE)
 
 # Transform coefficients to tibble
-t2 <- t1 %>%
+coefs <- impacts %>%
   as.data.frame() %>%
   t() %>%
   as.data.frame() %>%
@@ -36,17 +31,19 @@ t2 <- t1 %>%
   rename(Predictor = 1,
          value = 2)
 
-languages <- t2 %>% 
+# Calculate average impact of languages and rating
+languages <- coefs %>% 
   filter(str_detect(Predictor, "language")) %>% 
   select(value) %>% 
   colMeans()
 
-genres <- t2 %>% 
+genres <- coefs %>% 
   filter(str_detect(Predictor, "1")) %>% 
   select(value) %>% 
   colMeans()
 
-t3 <- t2 %>% 
+# Combine impact of languages and rating
+combined_coefs <- coefs %>% 
   filter(!str_detect(Predictor, "language"),
          !str_detect(Predictor, "1"),
          !str_detect(Predictor, "Intercept")) %>% 
@@ -55,7 +52,8 @@ t3 <- t2 %>%
           value = c(languages, genres)) %>% 
   arrange(-abs(value))
 
-t4 <- t3 %>% 
+# Transform for plotting
+to_plot <- combined_coefs %>% 
   mutate(id = seq_along(Predictor),
          color = ifelse(value < 0, "#F8766D", "#00BFC4"),
          end = c(head(cumsum(value), -1), sum(value)),
@@ -71,26 +69,30 @@ t4 <- t3 %>%
   select(id, Predictor, value, color, text_color, start, end) %>% 
   mutate(Predictor = reorder(Predictor, id))
 
-p3 <- ggplot(t4, aes(x = Predictor,
+# Plot waterfall chart of single prediction
+p3 <- ggplot(to_plot, aes(x = Predictor,
                      xmin = id - 0.45,
                      xmax = id + 0.45,
                      ymin = end,
                      ymax = start)) +
   geom_rect(color = "black",
-            fill = t4$color) +
+            fill = to_plot$color) +
   geom_segment(aes(x = id - 0.45,
                    xend = id + 1.45,
                    y = end,
                    yend = end),
-               data = head(t4, -1)) +
+               data = head(to_plot, -1)) +
   geom_text(aes(x = id,
                 y = start + (end - start) / 2,
                 label = format(round(value, 2), nsmall = 2)),
             size = 3,
-            color = t4$text_color) +
+            color = to_plot$text_color) +
   ylab("Impact on rating") +
   ggtitle("Impact of each predictor for a single observation",
           subtitle = paste("Observation number", which.min(y))) +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         legend.position = "none")
+
+# Plot
+p3

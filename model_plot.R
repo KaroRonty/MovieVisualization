@@ -9,57 +9,46 @@ library(RColorBrewer)
 # Register parallelization using all cores
 registerDoParallel(cores = detectCores())
 
+# Make cross validation object for caret
 cv <- trainControl(method = "repeatedcv",
-                   allowParallel = TRUE,
-                   seeds = 123) # FIXME ?
+                   allowParallel = TRUE)
 
+# Get features and target
 x <- movie_clean %>% model.matrix(avg_rating ~ ., data = .)
 y <- movie_clean %>% pull(avg_rating)
 
-#####
-elastic <- train(x,
-                 y,
+# Train different models
+set.seed(123)
+elastic <- train(x, y,
                  method = "glmnet",
                  trControl = cv)
 
-xgb <- train(x,
-             y,
+set.seed(123)
+xgb <- train(x, y,
              method = "xgbTree",
              trControl = cv)
 
-knn <- train(x,
-             y,
+set.seed(123)
+knn <- train(x, y,
              method = "knn",
              trControl = cv)
 
-mars <- train(x,
-              y,
+set.seed(123)
+mars <- train(x, y,
               method = "earth",
               trControl = cv)
 
-rf <- train(x,
-            y,
+set.seed(123)
+rf <- train(x, y,
             method = "rf",
             trControl = cv)
 
+# Print MAE of mean prediction
+(movie_clean$avg_rating - mean(movie_clean$avg_rating)) %>%
+  abs() %>%
+  mean()
 
-pred_elastic <- predict(elastic, x)
-cor(pred_elastic, y)^2
-
-pred_xgb <- predict(xgb, x)
-cor(pred_xgb, y)^2
-
-pred_knn <- predict(knn, x)
-cor(pred_knn, y)^2
-
-pred_mars <- predict(mars, x)
-cor(pred_mars, y)^2
-
-pred_rf <- predict(rf, x)
-cor(pred_rf, y)^2
-
-(movie_clean$avg_rating - mean(movie_clean$avg_rating)) %>% abs %>% mean()
-
+# Obtain R-squareds and MAEs
 results <- elastic$results %>%
   select(MAE, Rsquared) %>% 
   mutate(model = "Elastic Net") %>% 
@@ -80,6 +69,7 @@ results <- elastic$results %>%
          mean_MAE = mean(MAE)) %>% 
   ungroup()
 
+# Make the first plot with R-squareds
 p1 <- results %>% 
   ggplot(aes(x = reorder(model, mean_Rsquared), y = Rsquared, color = model)) +
   geom_quasirandom() +
@@ -91,6 +81,7 @@ p1 <- results %>%
   scale_y_continuous(limits = c(0, 1)) +
   xlab("")
 
+# Make the second plot with MAEs
 p2 <- results %>% 
   ggplot(aes(x = reorder(model, mean_Rsquared), y = MAE, color = model)) +
   geom_quasirandom() +
@@ -100,4 +91,5 @@ p2 <- results %>%
   scale_y_continuous(limits = c(0, max(results$MAE))) +
   xlab("")
 
+# Plot vertically using patchwork
 p1 / p2
