@@ -1,8 +1,6 @@
-detach("package:skimr", unload = TRUE)
 library(xgboost)
 library(tibble)
 library(stringr)
-library(ggplot2)
 
 # Make matrices for training and data to be plotted using a single observation
 training_xgb <- xgb.DMatrix(x, label = y)
