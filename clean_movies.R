@@ -4,14 +4,16 @@ library(readr) # faster import of .tsv files
 library(qdapTools) # creating dummy variables from multiple columns
 
 # Read in the datasets
-imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = '\t') %>% 
+imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
-imdb_basic <- read_delim("01_Data/title_basics.tsv", delim = '\t') %>% 
+
+imdb_basic <- read_delim("01_Data/title_basics.tsv", delim = "\t") %>% 
   as.data.frame() 
+
 movie_revenues <- read_delim("01_Data/movie_revenues.csv", delim = ";") %>% 
   as.data.frame()
 
-# Combine datasets by unique identifiers
+# Combine datasets by unique movie identifiers
 movies <- imdb_basic %>% 
   left_join(imdb_rating, by = c("tconst" = "tconst")) %>% 
   left_join(movie_revenues, by = c("tconst" = "imdb_id")) 
@@ -26,8 +28,7 @@ movies <- movies %>%
          -original_title:-popularity,
          -release_date,
          -spoken_languages:-title,
-         -spoken_languages_number) %>% 
-  mutate(titleType = as.factor(titleType))
+         -spoken_languages_number)
 
 # Set all column names to lower case
 colnames(movies) <- colnames(movies) %>% tolower()
@@ -71,7 +72,7 @@ movies <- movies %>%
 
 # Get unique movie categories
 unique_categories <- movies %>% 
-  select(g_imdb_1, g_imdb_2, g_imdb_3, g_imdb_4, g_imdb_5) %>% 
+  select(g_imdb_1:g_imdb_5) %>% 
   unlist() %>% 
   unique() %>% 
   sort()

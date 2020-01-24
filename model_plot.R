@@ -18,6 +18,8 @@ x <- movie_clean %>% model.matrix(avg_rating ~ ., data = .)
 y <- movie_clean %>% pull(avg_rating)
 
 # Train different models
+# NOTE: caret acts as a wrapper and needs underlying model libraries
+# to be installed
 set.seed(123)
 elastic <- train(x, y,
                  method = "glmnet",
