@@ -51,12 +51,7 @@ movies <- movies %>%
 
 # Keep only movies with certain charasteristics
 movies <- movies %>% 
-  filter(title_class == "movie") %>% 
-  filter(year >= 1975 & year <= 2025,
-         budget >= 1000,
-         votes >= 30,
-         runtime > 45,
-         revenue > 0) %>% 
+  filter(title_class %in% c("movie", "short")) %>%
   select(-vote_count, -vote_average)
 
 # Differentiate into genres by seperating the characters
@@ -108,3 +103,5 @@ movie_clean <- movies %>%
          revenue:prod_ct_nr,
          language,
          Action:War)
+
+
