@@ -3,6 +3,15 @@ library(tidyr)
 library(readr) # faster import of .tsv files
 library(qdapTools) # creating dummy variables from multiple columns
 
+library(ggplot2)
+library(gganimate)
+library(naniar)
+require(maps)
+require(countrycode)
+require(ggthemes)
+
+
+
 # Read in the datasets
 imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
@@ -95,6 +104,17 @@ movies <- movies %>%
 movies <- movies %>% 
   filter(Western == 0, News == 0) %>% 
   select(-Western, -News) 
+
+# ----- 
+# ALEKS Visualization Part
+
+world <- ggplot() +
+  borders("world", colour = "gray85", fill = "gray80") +
+  theme_map() 
+
+movies2 <- replace_with_na_if(movies, .predicate = is.character, condition = ~.x %in% ("none"))
+movies[, country_iso3c  <- countrycode(movies$prod_ct, 'country.name', 'iso3c')]
+
 
 # Change language column to factor and keep only certain columns for modelling
 movie_clean <- movies %>% 
