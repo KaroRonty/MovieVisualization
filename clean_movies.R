@@ -3,7 +3,9 @@ library(tidyr)
 library(readr) # faster import of .tsv files
 library(qdapTools) # creating dummy variables from multiple columns
 
-library(rworldmap)
+# library(rworldmap)
+library(tibble)
+library(lubridate)
 library(devtools)
 library(ggplot2)
 library(gganimate)
@@ -11,7 +13,10 @@ library(naniar)
 require(maps)
 require(countrycode)
 require(ggthemes)
-install_github("dgrtwo/gganimate", ref = "26ec501")
+# install_github("dgrtwo/gganimate", ref = "26ec501")
+devtools::install_github('thomasp85/gganimate')
+# install.packages("https://github.com/thomasp85/gganimate/releases/tag/v0.1.1")
+library(ggmap)
 
 library(curl)
 library(tweenr)
@@ -20,6 +25,7 @@ library(rgeos)
 library(readxl)
 library(data.table)
 
+options(digits = 2)
 # Read in the datasets
 imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
@@ -69,7 +75,7 @@ movies <- movies %>%
 # Keep only movies with certain charasteristics
 movies <- movies %>% 
   filter(title_class %in% c("movie", "short"),
-         year > 2019) %>% 
+         year < 2019) %>% 
   select(-vote_count, -vote_average)
 
 # Differentiate into genres by seperating the characters
@@ -117,26 +123,6 @@ movies <- movies %>%
 # ----- 
 # ALEKS Visualization Part
 
-world <- ggplot() +
-  borders("world", colour = "gray85", fill = "gray80") +
-  theme_map() 
-
-
-
-# get world map
-wmap <- getMap(resolution="low")
-
-# small edits
-wmap <- spTransform(wmap, CRS("+proj=robin")) # reproject
-wmap <-   subset(wmap, !(NAME %in% c("Antar"))) # Remove Antarctica
-
-# get centroids of countries
-centroids <- gCentroid(wmap , byid=TRUE, id = wmap@data$ISO3)
-centroids <- data.frame(centroids)
-setDT(centroids, keep.rownames = TRUE)[]
-setnames(centroids, "rn", "country_iso3c")
-
-
 # cleaning dataset for world map plotting
 movies_map <- 
   movies %>% 
@@ -149,25 +135,110 @@ movies_map$country_iso3c <- countrycode(movies_map$prod_ct, 'country.name', 'iso
 # creating a grouped df
 movies_map <- 
   movies_map %>%
+  mutate(year = as.integer(year)) %>% 
   group_by(country_iso3c, year) %>% 
-  count() %>% 
+  count() %>% # summing up number of movies
+  drop_na(year) %>% # to reduce mapping failures while rendering graphs
   arrange(year)
 
-# joining df on worldmap, moviedata & location (longitude & lattitude)
-wmap_df <- fortify(wmap, region = "ISO3")
-wmap_df <- left_join(wmap_df, movies_map, by = c("id" = "country_iso3c"))
-wmap_df <- left_join(wmap_df, centroids, by = c('id'='country_iso3c')) # centroids
+# generate a df for cumulative movie releases
+movies_map_cum <- movies_map %>% 
+  group_by(country_iso3c) %>% 
+  mutate(cum_n = cumsum(n)) %>% # summing up number of movies
+  arrange(year)
 
-movies_map <- left_join(movies_map, centroids, by = c("country_iso3c"="country_iso3c"))
+
+# creating first frame world map
+world <- ggplot() +
+  borders("world", colour = "gray85", fill = "gray80") +
+  theme_map() 
+
+# get centroid coordinates
+centroid <- read_delim("01_Data/country_centroids_az8.csv", delim = ",") %>% 
+  as.data.frame() %>% 
+  select(adm0_a3, Longitude, Latitude)
+
+# joining moviedata & location (longitude & lattitude)
+movies_map <- left_join(movies_map, centroid, by = c("country_iso3c"="adm0_a3"))
 
 # plotting
+
+br <- c(1,2,5,10,25,50,100,250,500,1000)
+
+a <- ggplot(data = movies_map) +
+  borders("world", colour = "gray90", fill = "gray85") +
+  theme_map() +
+  geom_jitter(aes(x = Longitude, y = Latitude, size = n, frame = year), 
+             colour = "#351C4D", alpha = 0.3) +
+  # geom_text(aes(x = Longitude, y = Latitude, label = n), hjust=0, vjust=0, size = 2) +
+  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90)) + 
+  labs(title = "Movies released in year: {frame_time}", size = "Nr. of Movies") +
+  # coord_cartesian(ylim = c(-50, 90)) +
+  transition_time(year) 
+
+b <- ggplot(data = movies_map_cum) +
+  borders("world", colour = "gray90", fill = "gray85") +
+  theme_map() +
+  geom_jitter(aes(x = Longitude, y = Latitude, size = cum_n*5, frame = year), 
+              colour = "#351C4D", alpha = 0.3) +
+  # geom_text(aes(x = Longitude, y = Latitude, label = n), hjust=0, vjust=0, size = 2) +
+  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90)) + 
+  labs(title = "Movies released in year: {frame_time}", size = "Nr. of Movies") +
+  # coord_cartesian(ylim = c(-50, 90)) +
+  transition_time(year) 
+
+animate(b,
+        duration = 30,
+        fps = 1, height = 800, width =1600) # every 5 years
+
+animate(a,
+        duration = 60,
+        fps = 2) # every year
+
+
+# -----
+# Try 1:
+
+p <- movies_map %>% 
+  ggplot(aes(x = Longitude, y = Latitude)) +
+  geom_map(data = world, 
+           map = world,
+           aes(long,lat, map_id = region),
+           colour = '#7f7f7f', fill = 'white',
+           alpha = 0.5) +
+  geom_map(data = movies_map, map = world,
+           aes(fill = n, map_id = country_iso3c),
+           colour="#7f7f7f", size=0.5) +
+  # geom_text(data = movies_map, 
+  #           aes(x = x, y = y, label = round(n)), size = 50.0) +
+  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90))+ 
+  # scale_fill_viridis(name="Life Expectancy", begin = 0, end = 1, limits = c(0,120), na.value="gray99") +
+  scale_fill_gradient(name = "legend", trans = "log", breaks = br, labels = br) +
+  scale_y_continuous(breaks=c()) +
+  scale_x_continuous(breaks=c()) +
+  labs(fill="legend", title="Title", x="", y="") +
+  theme_bw() 
+
+animate(p, )
+
 map <- world + 
-  geom_point(aes(x = long, y = lat, size = n, 
-                 frame = year,
+  geom_point(aes(x = x, y = y, size = n, frame = year, cumulative = T), 
+             data = movies_map, colour = 'purple', alpha = .5) +
+  scale_size_continuous(range = c(1,6), breaks = c(100, 500, 1000, 30000)) +
+  geom_point(aes(x = x, y = y, size = n, # this is the init transparent frame
+                 frame = created_at,
                  cumulative = TRUE),
-             data = movies_map, colour = 'purple', alpha = .5)
+             data = ghost_points_ini, alpha = 0) +
+  geom_point(aes(x = x, y = y, size = n, # this is the final transparent frames
+                 frame = created_at,
+                 cumulative = TRUE),
+             data = ghost_points_fin, alpha = 0) +
+  labs(size = "Number of Movies released")
 
+map + transition_time(movies_map$year) +
+  labs(title = "Year: {frame_time}")
 
+gganimate(map)
 
 # based on old gganimate package
 o <- ggplot(data=wmap_df) +
