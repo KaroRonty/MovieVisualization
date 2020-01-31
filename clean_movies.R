@@ -82,63 +82,81 @@ movies <- movies %>%
          prod_cp_nr = production_companies_number)
 
 # Keep only movies with certain charasteristics
+movies_subset <- movies %>% 
+  filter(title_class == "movie") %>% 
+  filter(year >= 1975 & year <= 2025,
+         budget >= 1000,
+         votes >= 30,
+         runtime > 45,
+         revenue > 0) %>% 
+  select(-vote_count, -vote_average)
+
+# Keep only movies with certain charasteristics
 movies <- movies %>%
   filter(title_class %in% c("movie", "short"),
          year <= 2017,
          year >= 1885) %>%
   select(-vote_count, -vote_average)
 
-# Differentiate into genres by seperating the characters
-# keeping both, the IMDb (max. 3), and the Kaggle (max. 5)
-# categorizations per movie
-movies <- movies %>%
-  separate(genre_kaggle, c("g_kaggle_1", "g_kaggle_2", "g_kaggle_3",
-                           "g_kaggle_4", "g_kaggle_5"),
-           sep = "[|]", extra = "drop", remove = FALSE) %>%
-  separate(genre_imdb, c("g_imdb_1", "g_imdb_2", "g_imdb_3",
-                         "g_imdb_4", "g_imdb_5"),
-           sep = ",", extra = "drop", remove = FALSE)
+# Clean movie categories and remove redundant columns and values
+clean_movies <- function(movies){
+  # Differentiate into genres by seperating the characters
+  # keeping both, the IMDb (max. 3), and the Kaggle (max. 5)
+  # categorizations per movie
+  movies <- movies %>%
+    separate(genre_kaggle, c("g_kaggle_1", "g_kaggle_2", "g_kaggle_3",
+                             "g_kaggle_4", "g_kaggle_5"),
+             sep = "[|]", extra = "drop", remove = FALSE) %>%
+    separate(genre_imdb, c("g_imdb_1", "g_imdb_2", "g_imdb_3",
+                           "g_imdb_4", "g_imdb_5"),
+             sep = ",", extra = "drop", remove = FALSE)
+  
+  # Get unique movie categories
+  unique_categories <- movies %>%
+    select(g_imdb_1:g_imdb_5) %>%
+    unlist() %>%
+    unique() %>%
+    sort()
+  
+  # Select three first categories, make dummy variables,
+  # arrange columns and turn them into factors
+  movies <- movies %>%
+    select(g_imdb_1:g_imdb_3) %>%
+    t() %>%
+    as.data.frame() %>%
+    mtabulate() %>%
+    mutate_all(as.factor) %>%
+    select(noquote(unique_categories)) %>%
+    cbind(movies, .)
+  
+  # Reset rownames that were affected by creating the dummy variables
+  rownames(movies) <- 1:nrow(movies)
+  
+  # Remove columns that were one-hot encoded
+  movies <- movies %>%
+    select(-genre_imdb:-g_imdb_5,
+           -genre_kaggle:-g_kaggle_5)
+  
+  # Remove movies in the "western" or "news" category
+  movies <- movies %>%
+    filter(Western == 0, News == 0) %>%
+    select(-Western, -News)
+  
+  # Change language column to factor and keep only certain columns for modelling
+  # we include only movies to reduce model training time
+  movie_clean <- movies %>%
+    filter(title_class == "movie") %>%
+    mutate(language = as.factor(language)) %>%
+    select(year:budget,
+           revenue:prod_ct_nr,
+           language,
+           Action:War)
+  
+  return(movie_clean)
+}  
 
-# Get unique movie categories
-unique_categories <- movies %>%
-  select(g_imdb_1:g_imdb_5) %>%
-  unlist() %>%
-  unique() %>%
-  sort()
-
-# Select three first categories, make dummy variables,
-# arrange columns and turn them into factors
-movies <- movies %>%
-  select(g_imdb_1:g_imdb_3) %>%
-  t() %>%
-  as.data.frame() %>%
-  mtabulate() %>%
-  mutate_all(as.factor) %>%
-  select(noquote(unique_categories)) %>%
-  cbind(movies, .)
-
-# Reset rownames that were affected by creating the dummy variables
-rownames(movies) <- 1:nrow(movies)
-
-# Remove columns that were one-hot encoded
-movies <- movies %>%
-  select(-genre_imdb:-g_imdb_5,
-         -genre_kaggle:-g_kaggle_5)
-
-# Remove movies in the "western" or "news" category
-movies <- movies %>%
-  filter(Western == 0, News == 0) %>%
-  select(-Western, -News)
-
-# Change language column to factor and keep only certain columns for modelling
-# we include only movies to reduce model training time
-movie_clean <- movies %>%
-  filter(title_class == "movie") %>%
-  mutate(language = as.factor(language)) %>%
-  select(year:budget,
-         revenue:prod_ct_nr,
-         language,
-         Action:War)
+# Clean movies for further processing
+movie_clean <- clean_movies(movies)
 
 # BASIC PLOTTING ----
 # Change of (average) ratings throughout the time
@@ -469,7 +487,7 @@ company_rating_plot <- ggplot(box_office_top,
 
 company_rating_plot
 
-## PREDICTION AND MODELLING ----
+## PREDICTION AND MODELLING ----s
 # Register parallelization using all cores
 registerDoParallel(cores = detectCores())
 
@@ -477,9 +495,12 @@ registerDoParallel(cores = detectCores())
 cv <- trainControl(method = "repeatedcv",
                    allowParallel = TRUE)
 
+# Clean movies for further processing
+movie_clean_subset <- clean_movies(movies_subset)
+
 # Get features and target
-x <- movie_clean %>% model.matrix(avg_rating ~ ., data = .)
-y <- movie_clean %>% pull(avg_rating)
+x <- movie_clean_subset %>% model.matrix(avg_rating ~ ., data = .)
+y <- movie_clean_subset %>% pull(avg_rating)
 
 # Train different models
 # NOTE: caret acts as a wrapper and needs underlying model libraries
@@ -510,7 +531,7 @@ rf <- train(x, y,
             trControl = cv)
 
 # Print MAE of mean prediction
-(movie_clean$avg_rating - mean(movie_clean$avg_rating)) %>%
+(movie_clean_subset$avg_rating - mean(movie_clean_subset$avg_rating)) %>%
   abs() %>%
   mean()
 
