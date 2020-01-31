@@ -77,7 +77,8 @@ movies <- movies %>%
 # Keep only movies with certain charasteristics
 movies <- movies %>% 
   filter(title_class %in% c("movie", "short"),
-         year < 2019) %>% 
+         year <= 2019,
+         year >= 1885) %>% 
   select(-vote_count, -vote_average)
 
 # Differentiate into genres by seperating the characters
@@ -130,25 +131,37 @@ movies <- movies %>%
 # Get overview and create rating average df
 summary(movies$avg_rating)
 
-plot(movies$year, movies_rating)
-
 movies_yearly_rating <- movies %>% 
   group_by(year) %>% 
   summarize(mean(avg_rating, na.rm = TRUE)) %>% 
   rename(average_rating = 'mean(avg_rating, na.rm = TRUE)')
 
-# Plot it with base R
-p_ratings <- 
-  plot(movies_yearly_rating$year, 
-       movies_yearly_rating$average_rating,
-       col="#EB299B",
-       xlab="Year", ylab="Average rating per year",
-       main="Development of movie ratings over time",
-       abline(lm(movies_yearly_rating$average_rating ~ movies_yearly_rating$year), col="dark grey"),
-  )
+# Plot it with base R and save
+png(file="yearly_ratings.png")
+plot(
+  movies_yearly_rating$year, 
+  movies_yearly_rating$average_rating,
+  col="#EB299B",
+  xlab="Year", 
+  ylab="Average rating per year",
+  main="Development of movie ratings over time",
+  abline(lm(movies_yearly_rating$average_rating ~ movies_yearly_rating$year), 
+  col="dark grey"))
+dev.off()
 
-# Compared to ggplot: create the same as part of a double-plot
+# Now compared to ggplot: create the same as part of a double-plot
+# Goal: Show importance of technology milestones
 
+# Milestones:
+# 1885: Moving pictures (Area of silent films -> 1927)
+# 1916: Color movies
+# 1927: Synchronized dialog
+# 1955: Portable cameras
+# 1973: Computer-Generated Imagery (CGI)
+# 1991: VCR - Home Viewing
+# 2000: Digital age - Internet and special effects
+
+# Plot 1: Average rating throughout the year (as before)
 p_ratings_gg <- movies_yearly_rating %>% 
   ggplot(mapping = aes(x = year)) +
   geom_point(aes(y = average_rating), color ="dark blue", alpha = 0.5) +
@@ -162,11 +175,16 @@ p_ratings_gg <- movies_yearly_rating %>%
         axis.ticks.x = element_blank(),
         axis.title.x = element_blank())
 
+# Extra: Add the milestone in the graph -> Manual way/bruteforcing:
+# ggplot(data = mtcars, aes(x = disp, y = mpg, color = factor(vs))) +
+#   geom_line(show.legend = FALSE) +
+#   geom_vline(aes(xintercept = mean(disp)), color = "red") +
+#   geom_vline(aes(xintercept = median(disp)), color = "blue") +
+#   geom_label(aes(mean(disp), 4, label = "mean"), show.legend = FALSE) +
+#   geom_label(aes(median(disp), 6, label = "median"), show.legend = FALSE) +
+#   facet_wrap(~ factor(am))
 
-## No. of film produced throughout the time + tech milestones
-# Goal: animated graphic with metricsgraphics 
-# shows milestone when clicking on the red line
-
+# Plot 2: No. of films produced throughout the time
 p_milestones_gg <- movies %>% 
   ggplot(mapping = aes(x = year)) + 
   geom_bar(color="dark blue", alpha = 0.2) +
@@ -182,30 +200,12 @@ p_milestones_gg <- movies %>%
        subtitle ="Yearly number of released movies",
        caption = "Each red line marks a technological milestone in the movie industry.")
 
-# Arrange with Patchwork
+# Arrange plots 1 and 2 with Patchwork
 library(patchwork)
 
 patchwork <- p_ratings_gg / p_milestones_gg
-patchwork
-
-
-# 1885: Moving pictures (Area of silent films -> 1927)
-# 1916: Color movies
-# 1927: Synchronized dialog
-# 1955: Portable cameras
-# 1973: Computer-Generated Imagery (CGI)
-# 1991: VCR - Home Viewing
-# 2000: Digital age - Internet and special effects
-
-# Manual way/bruteforcing:
-# ggplot(data = mtcars, aes(x = disp, y = mpg, color = factor(vs))) +
-#   geom_line(show.legend = FALSE) +
-#   geom_vline(aes(xintercept = mean(disp)), color = "red") +
-#   geom_vline(aes(xintercept = median(disp)), color = "blue") +
-#   geom_label(aes(mean(disp), 4, label = "mean"), show.legend = FALSE) +
-#   geom_label(aes(median(disp), 6, label = "median"), show.legend = FALSE) +
-#   facet_wrap(~ factor(am))
-
+patchwork + plot_layout(ncol=1,heights=c(3,3))
+ggsave('tech_milestones_ratings.png', patchwork)
 
 # ----- 
 # ALEKS Visualization Part
