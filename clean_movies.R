@@ -17,6 +17,7 @@ require(ggthemes)
 devtools::install_github('thomasp85/gganimate')
 # install.packages("https://github.com/thomasp85/gganimate/releases/tag/v0.1.1")
 library(ggmap)
+library(ggrepel)
 
 # library(curl)
 # library(tweenr)
@@ -142,11 +143,19 @@ movies_map <-
   drop_na(year) %>% # to reduce mapping failures while rendering graphs
   arrange(year)
 
+movies_map <- within(movies_map, uid <- paste(country_iso3c, year, sep = "."))
+
 # generate a df for cumulative movie releases
-movies_map_cum <- movies_map %>% 
-  group_by(country_iso3c) %>% 
-  mutate(cum_n = cumsum(n)) %>% # summing up number of movies
-  arrange(year)
+movies_map_cum <- data.frame(matrix(ncol = 3, nrow = (2017-1873)*length(uc)))
+colnames(movies_map_cum) <- c("id", "year", "n")
+
+movies_map_cum$id <- rep(uc, (2017-1873))
+movies_map_cum$year <- rep(seq(from = 1874, to = 2017),length(uc))
+movies_map_cum$n <- 0
+movies_map_cum <- within(movies_map_cum, uid <- paste(id, year, sep = "."))
+
+movies_map_cum <- left_join(movies_map_cum, movies_map, by = c("uid"), match = "first")
+
 
 
 # creating first frame world map
@@ -171,10 +180,11 @@ a <- ggplot(data = movies_map) +
   theme_map() +
   geom_jitter(aes(x = Longitude, y = Latitude, size = n, frame = year), 
              colour = "darkred", alpha = 0.3) +
-  geom_text(aes(x = Longitude, y = Latitude, label = ifelse((movies_map$n >= 50),n,"")), hjust=-0.8, vjust=0, size = 3) +
+  geom_label_repel(aes(x = Longitude, y = Latitude, label = ifelse((movies_map$n >= 50),n,"")), 
+                   fill = "darkred", color = "white", size = 3) +
   coord_cartesian(ylim = c(-50, 90)) + 
   labs(title = "Movies released in year: {frame_time}", 
-       subtitle = "Despite dominance of American and European movie production countries, relevance of Central Asian studios grows. /n Special emphasis on yearly production of more than 50 movies",
+       subtitle = "Despite dominance of American and European movie production countries, relevance of Central Asian studios grows. Special emphasis on yearly production of more than 50 movies",
        size = "Nr. of Movies") +
 
   scale_size(breaks = br) +
