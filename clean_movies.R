@@ -5,28 +5,30 @@ library(qdapTools) # creating dummy variables from multiple columns
 
 # library(rworldmap)
 library(tibble)
-library(lubridate)
+library(ddpcr)
+# library(lubridate)
 library(devtools)
 library(ggplot2)
-library(gganimate)
 library(naniar)
 require(maps)
 require(countrycode)
 require(ggthemes)
 # install_github("dgrtwo/gganimate", ref = "26ec501")
-devtools::install_github('thomasp85/gganimate')
+# devtools::install_github('thomasp85/gganimate')
+library(gganimate)
 # install.packages("https://github.com/thomasp85/gganimate/releases/tag/v0.1.1")
 library(ggmap)
 library(ggrepel)
+library(patchwork)
 
 # library(curl)
 # library(tweenr)
-library(viridis)
-library(rgeos)
+# library(viridis)
+# library(rgeos)
 # library(readxl)
 # library(data.table)
 
-options(digits = 2)
+# options(digits = 2)
 # Read in the datasets
 imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
@@ -44,7 +46,7 @@ movies <- imdb_basic %>%
 
 rm(movie_revenues, imdb_basic, imdb_rating)
 
-# Remove redundant columns
+# Remove redundant columns (removing data from other sources than IMDb)
 movies <- movies %>% 
   select(-originalTitle,
          -isAdult,
@@ -78,7 +80,7 @@ movies <- movies %>%
 # Keep only movies with certain charasteristics
 movies <- movies %>% 
   filter(title_class %in% c("movie", "short"),
-         year <= 2019,
+         year <= 2017,
          year >= 1885) %>% 
   select(-vote_count, -vote_average)
 
@@ -124,11 +126,17 @@ movies <- movies %>%
   filter(Western == 0, News == 0) %>% 
   select(-Western, -News) 
 
+# Change language column to factor and keep only certain columns for modelling
+movie_clean <- movies %>% 
+  mutate(language = as.factor(language)) %>% 
+  select(year:budget,
+         revenue:prod_ct_nr,
+         language,
+         Action:War)
 
-# ----- 
-# JANIK Visualization Part
 
-## Change of (average) ratings throughout the time
+# BASIC PLOTTING 
+# Change of (average) ratings throughout the time
 # Get overview and create rating average df
 summary(movies$avg_rating)
 
@@ -202,16 +210,14 @@ p_milestones_gg <- movies %>%
        caption = "Each red line marks a technological milestone in the movie industry.")
 
 # Arrange plots 1 and 2 with Patchwork
-library(patchwork)
 
 patchwork <- p_ratings_gg / p_milestones_gg
 patchwork + plot_layout(ncol=1,heights=c(3,3))
 ggsave('tech_milestones_ratings.png', patchwork)
 
-# ----- 
-# ALEKS Visualization Part
+# creating a animated worldmap with yearly released movies
 
-# cleaning dataset for world map plotting
+# cleaning dataset for world map plotting (excl. countries without ISO-based country codes)
 movies_map <- 
   movies %>% 
   filter(!prod_ct %in% c("Czechoslovakia", "East Germany", "Kosovo", "Netherlands Antilles", 
@@ -232,19 +238,6 @@ movies_map <-
 
 movies_map <- within(movies_map, uid <- paste(country_iso3c, year, sep = "."))
 
-# generate a df for cumulative movie releases
-movies_map_cum <- data.frame(matrix(ncol = 3, nrow = (2017-1873)*length(uc)))
-colnames(movies_map_cum) <- c("id", "year", "n")
-
-movies_map_cum$id <- rep(uc, (2017-1873))
-movies_map_cum$year <- rep(seq(from = 1874, to = 2017),length(uc))
-movies_map_cum$n <- 0
-movies_map_cum <- within(movies_map_cum, uid <- paste(id, year, sep = "."))
-
-movies_map_cum <- left_join(movies_map_cum, movies_map, by = c("uid"), match = "first")
-
-
-
 # creating first frame world map
 world <- ggplot() +
   borders("world", colour = "gray85", fill = "gray80") +
@@ -258,20 +251,24 @@ centroid <- read_delim("01_Data/country_centroids_az8.csv", delim = ",") %>%
 # joining moviedata & location (longitude & lattitude)
 movies_map <- left_join(movies_map, centroid, by = c("country_iso3c"="adm0_a3"))
 
+# using preset breaks for easier classification than the automatically set ones
+br <- c(1,2,5,10,25,50,100,500,1000) 
+
+
 # plotting
-
-br <- c(1,2,5,10,25,50,100,500,1000)
-
 a <- ggplot(data = movies_map) +
   borders("world", colour = "gray90", fill = "gray85") +
   theme_map() +
-  geom_jitter(aes(x = Longitude, y = Latitude, size = n, frame = year), 
+  geom_jitter(aes(x = Longitude, y = Latitude, size = n), 
              colour = "darkred", alpha = 0.3) +
   geom_label_repel(aes(x = Longitude, y = Latitude, label = ifelse((movies_map$n >= 50),n,"")), 
                    fill = "darkred", color = "white", size = 3) +
+  # adjusting coord so that Antarctica is not on the map
   coord_cartesian(ylim = c(-50, 90)) + 
+  
   labs(title = "Movies released in year: {frame_time}", 
        subtitle = "Despite dominance of American and European movie production countries, relevance of Central Asian studios grows. Special emphasis on yearly production of more than 50 movies",
+       caption = "Map by Group 3 // BAN422; source: IMDb and OMDb dataset", 
        size = "Nr. of Movies") +
 
   scale_size(breaks = br) +
@@ -285,78 +282,22 @@ a <- ggplot(data = movies_map) +
          legend.title=element_text(size=10), 
          legend.text=element_text(size=10)) +
 
+  # including animation dimension
   transition_time(year)
 
-
-# cumulative via cum. df
-b <- ggplot(data = movies_map_cum) +
-  borders("world", colour = "gray90", fill = "gray85") +
-  theme_map() +
-  geom_jitter(aes(x = Longitude, y = Latitude, size = cum_n, frame = year), 
-              colour = "#351C4D", alpha = 0.6) +
-  # geom_text(aes(x = Longitude, y = Latitude, label = n), hjust=0, vjust=0, size = 2) +
-  coord_cartesian(ylim = c(-50, 90)) +
-  labs(title = "Movies released in year: {frame_time}", 
-       subtitle = "",
-       size = "Nr. of Movies") +
-  theme( legend.position = c(0,0), 
-         legend.direction = "horizontal", 
-         legend.title.align = 0,
-         legend.key.size = unit(0.8, "cm"),
-         legend.title=element_text(size=10), 
-         legend.text=element_text(size=10)) +
-  transition_time(year)
-
-
-# create animations
-animate(a,
+# create animation
+a_anim <- 
+  animate(a,
         duration = 30,
         fps = 5, 
         height = 500, 
         width = 1000)
         # renderer = gifski_renderer(loop = F)) # stop at last frame
 
-animate(b,
-        duration = 20,
-        fps = 4, 
-        height = 900, 
-        width = 1200)
-        # renderer = gifski_renderer(loop = F)) # stop at last frame
-
-
-
-# based on old gganimate package
-o <- ggplot(data=wmap_df) +
-  geom_polygon(aes(x = long, y = lat, group = group, fill=n), color="gray90") +
-  geom_text(aes(x = x, y = y, label = round(n)), hjust=0, vjust=0, size = 4.5) +
-  scale_fill_viridis(name="Number of Movies", begin = 0, end = 1, limits = c(0,200), na.value="gray99") +
-  theme_void() +
-  guides(fill = guide_colorbar(title.position = "top")) +
-  labs(title = "Number of Movies produced per year and country") +
-  labs(caption = "Map by Group 3 // BAN422 \nsource: IMDb and OMDb datasets") +
-  theme(plot.title = element_text(hjust = 0.5, vjust = 0.05, size=25)) +
-  theme(plot.caption = element_text(hjust = 0, color="gray40", size=15)) +
-  coord_cartesian(xlim = c(-11807982, 14807978)) + 
-  theme( legend.position = c(.5, .08), 
-         legend.direction = "horizontal", 
-         legend.title.align = 0,
-         legend.key.size = unit(1.3, "cm"),
-         legend.title=element_text(size=17), 
-         legend.text=element_text(size=13) )
-
 # save gif
-gg_animate(o, "output4020_old.gif", title_frame =T, 
-           ani.width=1600, ani.height=820, dpi=800, interval = .4)
+save_animation(a_anim, "released_movies")
+anim_save("released_movies", animation = last_animation())
 
 
-
-
-# Change language column to factor and keep only certain columns for modelling
-movie_clean <- movies %>% 
-  mutate(language = as.factor(language)) %>% 
-  select(year:budget,
-         revenue:prod_ct_nr,
-         language,
-         Action:War)
 
 
