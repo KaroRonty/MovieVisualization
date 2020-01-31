@@ -3,32 +3,20 @@ library(tidyr)
 library(readr) # faster import of .tsv files
 library(qdapTools) # creating dummy variables from multiple columns
 
-# library(rworldmap)
 library(tibble)
 library(ddpcr)
-# library(lubridate)
 library(devtools)
-library(ggplot2)
 library(naniar)
 require(maps)
 require(countrycode)
+
+library(ggplot2)
 require(ggthemes)
-# install_github("dgrtwo/gganimate", ref = "26ec501")
-# devtools::install_github('thomasp85/gganimate')
 library(gganimate)
-# install.packages("https://github.com/thomasp85/gganimate/releases/tag/v0.1.1")
 library(ggmap)
 library(ggrepel)
 library(patchwork)
 
-# library(curl)
-# library(tweenr)
-# library(viridis)
-# library(rgeos)
-# library(readxl)
-# library(data.table)
-
-# options(digits = 2)
 # Read in the datasets
 imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
@@ -127,13 +115,14 @@ movies <- movies %>%
   select(-Western, -News) 
 
 # Change language column to factor and keep only certain columns for modelling
+# we include only movies to reduce model training time 
 movie_clean <- movies %>% 
+  filter(title_class == "movie") %>% 
   mutate(language = as.factor(language)) %>% 
   select(year:budget,
          revenue:prod_ct_nr,
          language,
          Action:War)
-
 
 # BASIC PLOTTING 
 # Change of (average) ratings throughout the time
@@ -299,5 +288,206 @@ save_animation(a_anim, "released_movies")
 anim_save("released_movies", animation = last_animation())
 
 
+# EGOR VISUALIZATION PART
+
+
+
+# PREDICTION AND MODELLING 
+
+library(doParallel)
+library(parallel)
+library(caret)
+library(ggbeeswarm)
+library(RColorBrewer)
+
+# Register parallelization using all cores
+registerDoParallel(cores = detectCores())
+
+# Make cross validation object for caret
+cv <- trainControl(method = "repeatedcv",
+                   allowParallel = TRUE)
+
+# Get features and target
+x <- movie_clean %>% model.matrix(avg_rating ~ ., data = .)
+y <- movie_clean %>% pull(avg_rating)
+
+# Train different models
+# NOTE: caret acts as a wrapper and needs underlying model libraries
+# to be installed
+set.seed(123)
+elastic <- train(x, y,
+                 method = "glmnet",
+                 trControl = cv)
+
+set.seed(123)
+xgb <- train(x, y,
+             method = "xgbTree",
+             trControl = cv)
+
+set.seed(123)
+knn <- train(x, y,
+             method = "knn",
+             trControl = cv)
+
+set.seed(123)
+mars <- train(x, y,
+              method = "earth",
+              trControl = cv)
+
+set.seed(123)
+rf <- train(x, y,
+            method = "rf",
+            trControl = cv)
+
+# Print MAE of mean prediction
+(movie_clean$avg_rating - mean(movie_clean$avg_rating)) %>%
+  abs() %>%
+  mean()
+
+# Obtain R-squareds and MAEs
+results <- elastic$results %>%
+  select(MAE, Rsquared) %>% 
+  mutate(model = "Elastic Net") %>% 
+  rbind(xgb$results %>% 
+          select(MAE, Rsquared) %>% 
+          mutate(model = "XGBoost")) %>% 
+  rbind(knn$results %>% 
+          select(MAE, Rsquared) %>% 
+          mutate(model = "KNN")) %>% 
+  rbind(mars$results %>% 
+          select(MAE, Rsquared) %>% 
+          mutate(model = "MARS")) %>% 
+  rbind(rf$results %>% 
+          select(MAE, Rsquared) %>% 
+          mutate(model = "Random Forest")) %>% 
+  group_by(model) %>% 
+  mutate(mean_Rsquared = mean(Rsquared),
+         mean_MAE = mean(MAE)) %>% 
+  ungroup()
+
+# Make the first plot with R-squareds
+p1 <- results %>% 
+  ggplot(aes(x = reorder(model, mean_Rsquared), y = Rsquared, color = model)) +
+  geom_quasirandom() +
+  ggtitle("Cross-validated accuracy measures for different models",
+          subtitle = "Using default hyperparameter search by the caret library") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  scale_colour_brewer(type = "qual", palette = "Dark2") +
+  scale_y_continuous(limits = c(0, 1)) +
+  xlab("")
+
+# Make the second plot with MAEs
+p2 <- results %>% 
+  ggplot(aes(x = reorder(model, mean_Rsquared), y = MAE, color = model)) +
+  geom_quasirandom() +
+  theme_bw() +
+  theme(legend.position = "none") +
+  scale_colour_brewer(type = "qual", palette = "Dark2") +
+  scale_y_continuous(limits = c(0, max(results$MAE))) +
+  xlab("")
+
+# Plot vertically using patchwork
+p1 / p2
+
+# SINGLE PREDICTION VISUALIZATION
+
+library(xgboost)
+library(tibble)
+library(stringr)
+
+# Make matrices for training and data to be plotted using a single observation
+training_xgb <- xgb.DMatrix(x, label = y)
+test_xgb <- xgb.DMatrix(x[which.min(y), , drop = FALSE])
+
+# Train XGBoost model using the same hyperparameters as caret
+set.seed(123)
+xgb_explain <- xgboost(data = xgb.DMatrix(x, label = y), 
+                       nround = xgb$bestTune$nrounds,
+                       max_depth = xgb$bestTune$max_depth, 
+                       eta = xgb$bestTune$eta,
+                       gamma = xgb$bestTune$gamma,
+                       colsample_bytree = xgb$bestTune$colsample_bytree,
+                       min_child_weight = xgb$bestTune$min_child_weight,
+                       subsample = xgb$bestTune$subsample,
+                       verbose = FALSE)
+
+# Obtain impacts of predictors
+impacts <- predict(xgb_explain, test_xgb, predcontrib = TRUE)
+
+# Transform coefficients to tibble
+coefs <- impacts %>%
+  as.data.frame() %>%
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column() %>% 
+  rename(Predictor = 1,
+         value = 2)
+
+# Calculate average impact of languages and rating
+languages <- coefs %>% 
+  filter(str_detect(Predictor, "language")) %>% 
+  select(value) %>% 
+  colMeans()
+
+genres <- coefs %>% 
+  filter(str_detect(Predictor, "1")) %>% 
+  select(value) %>% 
+  colMeans()
+
+# Combine impact of languages and rating
+combined_coefs <- coefs %>% 
+  filter(!str_detect(Predictor, "language"),
+         !str_detect(Predictor, "1"),
+         !str_detect(Predictor, "Intercept")) %>% 
+  mutate(Predictor = str_replace(Predictor, "BIAS", "intercept")) %>% 
+  add_row(Predictor = c("language", "genre"),
+          value = c(languages, genres)) %>% 
+  arrange(-abs(value))
+
+# Transform for plotting
+to_plot <- combined_coefs %>% 
+  mutate(id = seq_along(Predictor),
+         color = ifelse(value < 0, "#F8766D", "#00BFC4"),
+         end = c(head(cumsum(value), -1), sum(value)),
+         text_color = "black") %>% 
+  mutate(start = c(0, head(end, -1))) %>% 
+  add_row(id = max(.$id) + 1,
+          Predictor = "PREDICTION",
+          value = sum(.$value),
+          color = "black",
+          text_color = "white",
+          start = sum(.$value),
+          end = 0) %>% 
+  select(id, Predictor, value, color, text_color, start, end) %>% 
+  mutate(Predictor = reorder(Predictor, id))
+
+# Plot waterfall chart of single prediction
+p3 <- ggplot(to_plot, aes(x = Predictor,
+                          xmin = id - 0.45,
+                          xmax = id + 0.45,
+                          ymin = end,
+                          ymax = start)) +
+  geom_rect(color = "black",
+            fill = to_plot$color) +
+  geom_segment(aes(x = id - 0.45,
+                   xend = id + 1.45,
+                   y = end,
+                   yend = end),
+               data = head(to_plot, -1)) +
+  geom_text(aes(x = id,
+                y = start + (end - start) / 2,
+                label = format(round(value, 2), nsmall = 2)),
+            size = 3,
+            color = to_plot$text_color) +
+  ylab("Impact on rating") +
+  ggtitle("Impact of each predictor for a single observation",
+          subtitle = paste("Observation number", which.min(y))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+# Plot
+p3
 
 
