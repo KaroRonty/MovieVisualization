@@ -1,8 +1,11 @@
+## LIBRARIES ----
+# Data wrangling
 library(dplyr)
 library(tidyr)
 library(readr) # faster import of .tsv files
 library(qdapTools) # creating dummy variables from multiple columns
 
+# Maps visualisation
 library(tibble)
 library(ddpcr)
 library(devtools)
@@ -10,6 +13,7 @@ library(naniar)
 require(maps)
 require(countrycode)
 
+# Plotting and visualisation
 library(ggplot2)
 require(ggthemes)
 library(gganimate)
@@ -17,6 +21,19 @@ library(ggmap)
 library(ggrepel)
 library(patchwork)
 
+# For the modelling part
+library(doParallel)
+library(parallel)
+library(caret)
+library(ggbeeswarm)
+library(RColorBrewer)
+
+# For the single prediction visualisation
+library(xgboost)
+library(tibble)
+library(stringr)
+
+## PREPROCESSING ----
 # Read in the datasets
 imdb_rating <- read_delim("01_Data/title_ratings.tsv", delim = "\t") %>% 
   as.data.frame()
@@ -124,7 +141,7 @@ movie_clean <- movies %>%
          language,
          Action:War)
 
-# BASIC PLOTTING 
+# BASIC PLOTTING ----
 # Change of (average) ratings throughout the time
 # Get overview and create rating average df
 summary(movies$avg_rating)
@@ -144,7 +161,7 @@ plot(
   ylab="Average rating per year",
   main="Development of movie ratings over time",
   abline(lm(movies_yearly_rating$average_rating ~ movies_yearly_rating$year), 
-  col="dark grey"))
+         col="dark grey"))
 dev.off()
 
 # Now compared to ggplot: create the same as part of a double-plot
@@ -249,7 +266,7 @@ a <- ggplot(data = movies_map) +
   borders("world", colour = "gray90", fill = "gray85") +
   theme_map() +
   geom_jitter(aes(x = Longitude, y = Latitude, size = n), 
-             colour = "darkred", alpha = 0.3) +
+              colour = "darkred", alpha = 0.3) +
   geom_label_repel(aes(x = Longitude, y = Latitude, label = ifelse((movies_map$n >= 50),n,"")), 
                    fill = "darkred", color = "white", size = 3) +
   # adjusting coord so that Antarctica is not on the map
@@ -259,10 +276,10 @@ a <- ggplot(data = movies_map) +
        subtitle = "Despite dominance of American and European movie production countries, relevance of Central Asian studios grows. Special emphasis on yearly production of more than 50 movies",
        caption = "Map by Group 3 // BAN422; source: IMDb and OMDb dataset", 
        size = "Nr. of Movies") +
-
+  
   scale_size(breaks = br) +
-
-    theme( plot.title = element_text(color = "black", size = 14, face = "bold"),
+  
+  theme( plot.title = element_text(color = "black", size = 14, face = "bold"),
          plot.subtitle = element_text(color = "darkgrey", size = 12),
          legend.position = c(0,0), 
          legend.direction = "horizontal", 
@@ -270,36 +287,195 @@ a <- ggplot(data = movies_map) +
          legend.key.size = unit(0.8, "cm"),
          legend.title=element_text(size=10), 
          legend.text=element_text(size=10)) +
-
+  
   # including animation dimension
   transition_time(year)
 
 # create animation
 a_anim <- 
   animate(a,
-        duration = 30,
-        fps = 5, 
-        height = 500, 
-        width = 1000)
-        # renderer = gifski_renderer(loop = F)) # stop at last frame
+          duration = 30,
+          fps = 5, 
+          height = 500, 
+          width = 1000)
+# renderer = gifski_renderer(loop = F)) # stop at last frame
 
 # save gif
 save_animation(a_anim, "released_movies")
 anim_save("released_movies", animation = last_animation())
 
 
-# EGOR VISUALIZATION PART
+## VISUALISATON OF THE LEADING STATES AND ENTITIES ----
+# Box office and rating for countries and studios
+# Top 15 movies with the highest revenue
+top_rev <- head(movies[order(movies$revenue, decreasing = TRUE), 
+                       c("title", "revenue")], n = 15)
 
+top_rev$title <- reorder(top_rev$title, as.numeric(top_rev$revenue))
+top_rev$revenue <- paste(format(round(top_rev$revenue / 1e9, 2), trim = TRUE), "B")
 
+top_plot <- ggplot(top_rev, aes(title, revenue, fill = revenue)) +
+  geom_col(position = "dodge") + 
+  theme_minimal()+
+  labs(x = "Title", 
+       y = "Revenue (USD)", 
+       title = "Top 15 Movie with the highest revenue")+
+  theme(legend.position = "none")+
+  coord_flip()
 
-# PREDICTION AND MODELLING 
+top_plot
 
-library(doParallel)
-library(parallel)
-library(caret)
-library(ggbeeswarm)
-library(RColorBrewer)
+# Revenue by country
+rev_ct <- movies %>% 
+  group_by(prod_ct) %>% 
+  summarise(revenue = sum(revenue))
 
+rev_ct <- head(rev_ct[order(rev_ct$revenue, decreasing = TRUE), 
+                      c("prod_ct", "revenue")], n = 10)
+
+rev_ct$prod_ct <- reorder(rev_ct$prod_ct, as.numeric(rev_ct$revenue))
+rev_ct$revenue <- as.numeric(paste(format(round(rev_ct$revenue / 1e9, 2), trim = TRUE)))
+
+rev_ct_plot <- ggplot(rev_ct, aes(prod_ct, revenue, fill = revenue)) +
+  geom_col(position = "dodge") + 
+  theme_minimal()+
+  labs(x = "Country", 
+       y = "Revenue (in billions USD)", 
+       title = "Top 10 Countries by revenue")+
+  theme(legend.position = "none")+
+  coord_flip()
+
+rev_ct_plot
+
+# Revenue by company
+rev_cp <- movies %>% 
+  group_by(prod_cp) %>% 
+  summarise(revenue = sum(revenue))
+
+rev_cp <- head(rev_cp[order(rev_cp$revenue, decreasing = TRUE), 
+                      c("prod_cp", "revenue")], n = 15)
+
+rev_cp$prod_cp <- reorder(rev_cp$prod_cp, as.numeric(rev_cp$revenue))
+rev_cp$revenue <- as.numeric(paste(format(round(rev_cp$revenue / 1e9, 2), trim = TRUE)))
+
+rev_cp_plot <- ggplot(rev_cp, aes(prod_cp, revenue, fill = revenue)) +
+  geom_col(position = "dodge") + 
+  theme_minimal()+
+  labs(x = "Company", 
+       y = "Revenue (in billions USD)", 
+       title = "Top 20 Studios by revenue")+
+  theme(legend.position = "none")+
+  coord_flip()
+
+rev_cp_plot
+
+# Rating by country
+rate_ct <- movies %>% 
+  filter (movies$avg_rating > 0) %>% 
+  filter (!is.na(prod_ct))
+
+rate_ct <- rate_ct %>% 
+  group_by(prod_ct) %>% 
+  summarise(rating = mean(avg_rating))
+
+rate_ct <- head(rate_ct[order(rate_ct$rating, decreasing = TRUE), 
+                        c("prod_ct", "rating")], n = 15)
+
+rate_ct$prod_ct <- reorder(rate_ct$prod_ct, as.numeric(rate_ct$rating))
+
+rate_ct_plot <- ggplot(rate_ct, aes(prod_ct, rating, fill = rating)) +
+  geom_col(position = "dodge") + 
+  theme_minimal()+
+  labs(x = "Country", 
+       y = "Rating", 
+       title = "Top 20 Countries by average rating")+
+  theme(legend.position = "none")+
+  coord_flip()
+
+rate_ct_plot
+
+# Rating by company
+rate_cp <- movies %>% 
+  filter (movies$avg_rating > 0) %>% 
+  filter (!is.na(prod_cp))
+
+rate_cp <- rate_cp %>% 
+  group_by(prod_cp) %>% 
+  summarise(rating = mean(avg_rating))
+
+rate_cp <- head(rate_cp[order(rate_cp$rating, decreasing = TRUE), 
+                        c("prod_cp", "rating")], n = 10)
+
+rate_cp$prod_cp <- reorder(rate_cp$prod_cp, as.numeric(rate_cp$rating))
+
+rate_cp_plot <- ggplot(rate_cp, aes(prod_cp, rating, fill = rating)) +
+  geom_col(position = "dodge") + 
+  theme_minimal()+
+  labs(x = "Studio", 
+       y = "Rating", 
+       title = "Top 10 Studios by average rating")+ 
+  theme(legend.position = "none")+
+  coord_flip()
+
+rate_cp_plot
+
+# Box office per year (for countries)
+box_office <- movies %>% 
+  filter(revenue > 0) %>% 
+  group_by(prod_ct, year) %>% 
+  summarise (revenue = sum(revenue))
+
+top_countries_rev <- as.character(rev_ct$prod_ct)
+box_office_top <- box_office[which(box_office$prod_ct %in% top_countries_rev),] %>% 
+  top_n(10)
+
+box_office_top$revenue <- as.numeric(paste(format(round(box_office_top$revenue / 1e9, 2), trim = TRUE)))
+
+country_rating_plot <- ggplot(
+  box_office_top, 
+  aes(x = year, 
+      y= prod_ct, 
+      size = revenue, 
+      colour = prod_ct)) +
+  geom_point(show.legend = T, alpha = 0.7) +
+  scale_color_viridis_d() +
+  scale_size(range = c(1, 15), name = "Revenue (in billions)") +
+  scale_x_log10()+theme_minimal()+
+  labs(x = "Year", 
+       y = "Revenue",
+       title = "Top 10 profitable years by leading countries")+guides(colour = FALSE)
+
+country_rating_plot
+
+# Box office per year (for studios)
+box_office <- movies %>% 
+  filter(revenue > 0) %>% 
+  group_by(prod_cp, year) %>% 
+  summarise (revenue = sum(revenue))
+
+top_companies_rev <- as.character(rev_cp$prod_cp)
+box_office_top <- box_office[which(box_office$prod_cp %in% top_companies_rev),] %>% 
+  top_n(10)
+
+box_office_top$revenue <- as.numeric(paste(format(round(box_office_top$revenue / 1e9, 2), trim = TRUE)))
+
+company_rating_plot <- ggplot(
+  box_office_top, 
+  aes(x = year, 
+      y= prod_cp, 
+      size = revenue, 
+      colour = prod_cp)) +
+  geom_point(show.legend = T, alpha = 0.7) +
+  scale_color_viridis_d() +
+  scale_size(range = c(1, 15), name = "Revenue (in billions)") +
+  scale_x_log10()+theme_minimal()+
+  labs(x = "Year", 
+       y = "Revenue",
+       title = "Top 10 profitable years by leading studios")+guides(colour = FALSE)
+
+company_rating_plot
+
+## PREDICTION AND MODELLING ----
 # Register parallelization using all cores
 registerDoParallel(cores = detectCores())
 
@@ -390,12 +566,7 @@ p2 <- results %>%
 # Plot vertically using patchwork
 p1 / p2
 
-# SINGLE PREDICTION VISUALIZATION
-
-library(xgboost)
-library(tibble)
-library(stringr)
-
+# SINGLE PREDICTION VISUALIZATION----
 # Make matrices for training and data to be plotted using a single observation
 training_xgb <- xgb.DMatrix(x, label = y)
 test_xgb <- xgb.DMatrix(x[which.min(y), , drop = FALSE])
@@ -489,5 +660,3 @@ p3 <- ggplot(to_plot, aes(x = Predictor,
 
 # Plot
 p3
-
-
