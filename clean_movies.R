@@ -41,6 +41,8 @@ movies <- imdb_basic %>%
   left_join(imdb_rating, by = c("tconst" = "tconst")) %>% 
   left_join(movie_revenues, by = c("tconst" = "imdb_id")) 
 
+rm(movie_revenues, imdb_basic, imdb_rating)
+
 # Remove redundant columns
 movies <- movies %>% 
   select(-originalTitle,
@@ -119,6 +121,91 @@ movies <- movies %>%
 movies <- movies %>% 
   filter(Western == 0, News == 0) %>% 
   select(-Western, -News) 
+
+
+# ----- 
+# JANIK Visualization Part
+
+## Change of (average) ratings throughout the time
+# Get overview and create rating average df
+summary(movies$avg_rating)
+
+plot(movies$year, movies_rating)
+
+movies_yearly_rating <- movies %>% 
+  group_by(year) %>% 
+  summarize(mean(avg_rating, na.rm = TRUE)) %>% 
+  rename(average_rating = 'mean(avg_rating, na.rm = TRUE)')
+
+# Plot it with base R
+p_ratings <- 
+  plot(movies_yearly_rating$year, 
+       movies_yearly_rating$average_rating,
+       col="#EB299B",
+       xlab="Year", ylab="Average rating per year",
+       main="Development of movie ratings over time",
+       abline(lm(movies_yearly_rating$average_rating ~ movies_yearly_rating$year), col="dark grey"),
+  )
+
+# Compared to ggplot: create the same as part of a double-plot
+
+p_ratings_gg <- movies_yearly_rating %>% 
+  ggplot(mapping = aes(x = year)) +
+  geom_point(aes(y = average_rating), color ="dark blue", alpha = 0.5) +
+  stat_smooth(aes(y = average_rating), color="dark grey") +
+  scale_x_continuous(breaks=seq(1885,2020,15)) +
+  geom_vline(xintercept = c(1885,1916,1927,1955,1973,1991,2000), col = "red") +
+  labs(y = "Average rating",
+       title = "Influence of technological improvements on movies",
+       subtitle = "Yearly average movie ratings") +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank())
+
+
+## No. of film produced throughout the time + tech milestones
+# Goal: animated graphic with metricsgraphics 
+# shows milestone when clicking on the red line
+
+p_milestones_gg <- movies %>% 
+  ggplot(mapping = aes(x = year)) + 
+  geom_bar(color="dark blue", alpha = 0.2) +
+  scale_x_continuous(breaks=seq(1885,2020,15)) +
+  geom_vline(xintercept = c(1885,1916,1927,1955,1973,1991,2000),
+             col = "red") +
+  #geom_text(aes(x = c(1885,1916,1927,1955,1973,1991,2000), 
+  #              y = 45000, 
+  #              label = c("Moving pictures","Color movies","Synchronized dialog","Portable cameras","CGI","VCR","Digital")), 
+  #              size = 3, vjust = 0, hjust = 0, nudge_x = 50) +
+  labs(x = "Year",
+       y = "Total number of movies",
+       subtitle ="Yearly number of released movies",
+       caption = "Each red line marks a technological milestone in the movie industry.")
+
+# Arrange with Patchwork
+library(patchwork)
+
+patchwork <- p_ratings_gg / p_milestones_gg
+patchwork
+
+
+# 1885: Moving pictures (Area of silent films -> 1927)
+# 1916: Color movies
+# 1927: Synchronized dialog
+# 1955: Portable cameras
+# 1973: Computer-Generated Imagery (CGI)
+# 1991: VCR - Home Viewing
+# 2000: Digital age - Internet and special effects
+
+# Manual way/bruteforcing:
+# ggplot(data = mtcars, aes(x = disp, y = mpg, color = factor(vs))) +
+#   geom_line(show.legend = FALSE) +
+#   geom_vline(aes(xintercept = mean(disp)), color = "red") +
+#   geom_vline(aes(xintercept = median(disp)), color = "blue") +
+#   geom_label(aes(mean(disp), 4, label = "mean"), show.legend = FALSE) +
+#   geom_label(aes(median(disp), 6, label = "median"), show.legend = FALSE) +
+#   facet_wrap(~ factor(am))
+
 
 # ----- 
 # ALEKS Visualization Part
