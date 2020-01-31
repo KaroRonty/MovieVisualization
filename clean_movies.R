@@ -18,12 +18,12 @@ devtools::install_github('thomasp85/gganimate')
 # install.packages("https://github.com/thomasp85/gganimate/releases/tag/v0.1.1")
 library(ggmap)
 
-library(curl)
-library(tweenr)
+# library(curl)
+# library(tweenr)
 library(viridis)
 library(rgeos)
-library(readxl)
-library(data.table)
+# library(readxl)
+# library(data.table)
 
 options(digits = 2)
 # Read in the datasets
@@ -127,7 +127,8 @@ movies <- movies %>%
 movies_map <- 
   movies %>% 
   filter(!prod_ct %in% c("Czechoslovakia", "East Germany", "Kosovo", "Netherlands Antilles", 
-                         "none", "Serbia and Montenegro", "Yugoslavia", "Soviet Union", NA))
+                         "none", "Serbia and Montenegro", "Yugoslavia", "Soviet Union", NA),
+         year < 2018)
 
 # mapping iso-conform country names to df
 movies_map$country_iso3c <- countrycode(movies_map$prod_ct, 'country.name', 'iso3c', warn = TRUE)
@@ -163,82 +164,69 @@ movies_map <- left_join(movies_map, centroid, by = c("country_iso3c"="adm0_a3"))
 
 # plotting
 
-br <- c(1,2,5,10,25,50,100,250,500,1000)
+br <- c(1,2,5,10,25,50,100,500,1000)
 
 a <- ggplot(data = movies_map) +
   borders("world", colour = "gray90", fill = "gray85") +
   theme_map() +
   geom_jitter(aes(x = Longitude, y = Latitude, size = n, frame = year), 
-             colour = "#351C4D", alpha = 0.3) +
-  # geom_text(aes(x = Longitude, y = Latitude, label = n), hjust=0, vjust=0, size = 2) +
-  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90)) + 
-  labs(title = "Movies released in year: {frame_time}", size = "Nr. of Movies") +
-  # coord_cartesian(ylim = c(-50, 90)) +
-  transition_time(year) 
+             colour = "darkred", alpha = 0.3) +
+  geom_text(aes(x = Longitude, y = Latitude, label = ifelse((movies_map$n >= 50),n,"")), hjust=-0.8, vjust=0, size = 3) +
+  coord_cartesian(ylim = c(-50, 90)) + 
+  labs(title = "Movies released in year: {frame_time}", 
+       subtitle = "Despite dominance of American and European movie production countries, relevance of Central Asian studios grows. /n Special emphasis on yearly production of more than 50 movies",
+       size = "Nr. of Movies") +
 
+  scale_size(breaks = br) +
+
+    theme( plot.title = element_text(color = "black", size = 14, face = "bold"),
+         plot.subtitle = element_text(color = "darkgrey", size = 12),
+         legend.position = c(0,0), 
+         legend.direction = "horizontal", 
+         legend.title.align = 0,
+         legend.key.size = unit(0.8, "cm"),
+         legend.title=element_text(size=10), 
+         legend.text=element_text(size=10)) +
+
+  transition_time(year)
+
+
+# cumulative via cum. df
 b <- ggplot(data = movies_map_cum) +
   borders("world", colour = "gray90", fill = "gray85") +
   theme_map() +
-  geom_jitter(aes(x = Longitude, y = Latitude, size = cum_n*5, frame = year), 
-              colour = "#351C4D", alpha = 0.3) +
+  geom_jitter(aes(x = Longitude, y = Latitude, size = cum_n, frame = year), 
+              colour = "#351C4D", alpha = 0.6) +
   # geom_text(aes(x = Longitude, y = Latitude, label = n), hjust=0, vjust=0, size = 2) +
-  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90)) + 
-  labs(title = "Movies released in year: {frame_time}", size = "Nr. of Movies") +
-  # coord_cartesian(ylim = c(-50, 90)) +
-  transition_time(year) 
+  coord_cartesian(ylim = c(-50, 90)) +
+  labs(title = "Movies released in year: {frame_time}", 
+       subtitle = "",
+       size = "Nr. of Movies") +
+  theme( legend.position = c(0,0), 
+         legend.direction = "horizontal", 
+         legend.title.align = 0,
+         legend.key.size = unit(0.8, "cm"),
+         legend.title=element_text(size=10), 
+         legend.text=element_text(size=10)) +
+  transition_time(year)
+
+
+# create animations
+animate(a,
+        duration = 30,
+        fps = 5, 
+        height = 500, 
+        width = 1000)
+        # renderer = gifski_renderer(loop = F)) # stop at last frame
 
 animate(b,
-        duration = 30,
-        fps = 1, height = 800, width =1600) # every 5 years
+        duration = 20,
+        fps = 4, 
+        height = 900, 
+        width = 1200)
+        # renderer = gifski_renderer(loop = F)) # stop at last frame
 
-animate(a,
-        duration = 60,
-        fps = 2) # every year
 
-
-# -----
-# Try 1:
-
-p <- movies_map %>% 
-  ggplot(aes(x = Longitude, y = Latitude)) +
-  geom_map(data = world, 
-           map = world,
-           aes(long,lat, map_id = region),
-           colour = '#7f7f7f', fill = 'white',
-           alpha = 0.5) +
-  geom_map(data = movies_map, map = world,
-           aes(fill = n, map_id = country_iso3c),
-           colour="#7f7f7f", size=0.5) +
-  # geom_text(data = movies_map, 
-  #           aes(x = x, y = y, label = round(n)), size = 50.0) +
-  coord_map("rectangular", lat0=0, xlim=c(-180,180), ylim=c(-60, 90))+ 
-  # scale_fill_viridis(name="Life Expectancy", begin = 0, end = 1, limits = c(0,120), na.value="gray99") +
-  scale_fill_gradient(name = "legend", trans = "log", breaks = br, labels = br) +
-  scale_y_continuous(breaks=c()) +
-  scale_x_continuous(breaks=c()) +
-  labs(fill="legend", title="Title", x="", y="") +
-  theme_bw() 
-
-animate(p, )
-
-map <- world + 
-  geom_point(aes(x = x, y = y, size = n, frame = year, cumulative = T), 
-             data = movies_map, colour = 'purple', alpha = .5) +
-  scale_size_continuous(range = c(1,6), breaks = c(100, 500, 1000, 30000)) +
-  geom_point(aes(x = x, y = y, size = n, # this is the init transparent frame
-                 frame = created_at,
-                 cumulative = TRUE),
-             data = ghost_points_ini, alpha = 0) +
-  geom_point(aes(x = x, y = y, size = n, # this is the final transparent frames
-                 frame = created_at,
-                 cumulative = TRUE),
-             data = ghost_points_fin, alpha = 0) +
-  labs(size = "Number of Movies released")
-
-map + transition_time(movies_map$year) +
-  labs(title = "Year: {frame_time}")
-
-gganimate(map)
 
 # based on old gganimate package
 o <- ggplot(data=wmap_df) +
